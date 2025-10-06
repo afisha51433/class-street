@@ -28,7 +28,7 @@
   <div id="app">
     <aside id="sidebar">
       <h1>班級小街道 3D 展示</h1>
-      <p>把學生做好的 <b>.glb</b>（建議）或 <b>.gltf</b> 檔案拖曳到下面的框，或點擊上傳。系統會自動把每棟房子依序排在街道上。<br/>（僅本機瀏覽，檔案不會上傳到網路）</p>
+      <p>把做好的 <b>.glb</b>（建議）或 <b>.obj .stlf</b> 檔案拖曳到下面的框，或點擊上傳。系統會自動把每棟房子依序排在街道上。<br/>（僅本機瀏覽，檔案不會上傳到網路）</p>
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="拖放或點擊選擇檔案">
         拖放檔案到這裡，或點我選擇
         <input id="file" type="file" accept=".glb,.gltf,.zip" multiple />
@@ -37,7 +37,7 @@
         <button id="resetCam">重設視角</button>
         <button id="clearAll">清除全部模型</button>
       </div>
-      <div id="help">💡 小撇步：建議學生匯出 <b>GLB</b>，大小控制在 5–20MB 內；檔名即為房子標籤。</div>
+      <div id="help">💡 小撇步：建議匯出 <b>GLB</b>，大小控制在 5–20MB 內；檔名即為房子標籤。</div>
       <div id="list"></div>
     </aside>
     <main id="canvas-wrap">
