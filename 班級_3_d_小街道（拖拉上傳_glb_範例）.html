@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>班級小街道 3D 展示（拖拉上傳 GLB）</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+    #app { position: absolute; inset: 0; display: grid; grid-template-columns: 320px 1fr; }
+    #sidebar { background: #0f172a; color: #e2e8f0; padding: 16px; overflow: auto; }
+    #sidebar h1 { font-size: 18px; margin: 0 0 8px; }
+    #sidebar p { font-size: 13px; line-height: 1.5; color: #cbd5e1; }
+    #sidebar .dropzone { border: 2px dashed #64748b; border-radius: 12px; padding: 16px; text-align: center; background: #111827; color: #cbd5e1; cursor: pointer; }
+    #sidebar .dropzone.dragover { border-color: #93c5fd; background: #0b1220; }
+    #file { display: none; }
+    #list { margin-top: 12px; font-size: 13px; }
+    #list .item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: #0b1220; margin-bottom: 6px; }
+    #list .badge { background: #1e293b; color: #93c5fd; border: 1px solid #334155; padding: 2px 6px; border-radius: 999px; font-size: 11px; }
+    #controls { display: grid; gap: 8px; margin-top: 12px; }
+    button { appearance: none; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 8px 10px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+    button:hover { background: #111827; }
+    #help { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+    #canvas-wrap { position: relative; background: #0b1020; }
+    #hint { position: absolute; top: 12px; left: 12px; background: rgba(15,23,42,0.7); color: #e2e8f0; padding: 8px 10px; border-radius: 8px; font-size: 12px; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h1>班級小街道 3D 展示</h1>
+      <p>把學生做好的 <b>.glb</b>（建議）或 <b>.gltf</b> 檔案拖曳到下面的框，或點擊上傳。系統會自動把每棟房子依序排在街道上。<br/>（僅本機瀏覽，檔案不會上傳到網路）</p>
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="拖放或點擊選擇檔案">
+        拖放檔案到這裡，或點我選擇
+        <input id="file" type="file" accept=".glb,.gltf,.zip" multiple />
+      </div>
+      <div id="controls">
+        <button id="resetCam">重設視角</button>
+        <button id="clearAll">清除全部模型</button>
+      </div>
+      <div id="help">💡 小撇步：建議學生匯出 <b>GLB</b>，大小控制在 5–20MB 內；檔名即為房子標籤。</div>
+      <div id="list"></div>
+    </aside>
+    <main id="canvas-wrap">
+      <div id="hint">滑鼠拖曳旋轉、滾輪縮放、右鍵平移。也可把檔案直接拖進視窗。</div>
+      <canvas id="c"></canvas>
+    </main>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+    import { OrbitControls } from 'https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js';
+    import { GLTFLoader } from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
+    import { OBJLoader } from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/OBJLoader.js';
+    import { STLLoader } from 'https://unpkg.com/three@0.161.0/examples/jsm/loaders/STLLoader.js';
+
+    // --- Three.js 基本場景設定 ---
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87a6d1); // 柔和天空色
+
+    const camera = new THREE.PerspectiveCamera(60, 2, 0.1, 2000);
+    camera.position.set(24, 16, 34);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(10, 0, 0);
+
+    // 光源
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x445566, 0.7);
+    scene.add(hemi);
+
+    const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+    dir.position.set(10, 30, 12);
+    dir.castShadow = true;
+    dir.shadow.mapSize.set(2048, 2048);
+    scene.add(dir);
+
+    // 地面與街道
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(400, 200),
+      new THREE.MeshPhongMaterial({ color: 0xa3c3a1, depthWrite: true })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // 路面（深灰）
+    const roadWidth = 16;
+    const roadLength = 360;
+    const road = new THREE.Mesh(
+      new THREE.BoxGeometry(roadLength, 0.1, roadWidth),
+      new THREE.MeshStandardMaterial({ color: 0x2a2f36 })
+    );
+    road.position.set(roadLength/2 - 20, 0.05, 0);
+    road.receiveShadow = true;
+    scene.add(road);
+
+    // 人行道（兩側淺灰）
+    const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xbfc5cc });
+    const sidewalkLeft = new THREE.Mesh(new THREE.BoxGeometry(roadLength, 0.2, 3), sidewalkMat);
+    sidewalkLeft.position.set(road.position.x, 0.11, -roadWidth/2 - 1.5);
+    sidewalkLeft.receiveShadow = true;
+    scene.add(sidewalkLeft);
+
+    const sidewalkRight = sidewalkLeft.clone();
+    sidewalkRight.position.z = roadWidth/2 + 1.5;
+    scene.add(sidewalkRight);
+
+    // 中線（虛線）
+    const dashes = new THREE.Group();
+    const dashGeom = new THREE.BoxGeometry(3, 0.05, 0.3);
+    const dashMat = new THREE.MeshStandardMaterial({ color: 0xf3f4f6 });
+    for (let x = 0; x < roadLength; x += 6) {
+      const dash = new THREE.Mesh(dashGeom, dashMat);
+      dash.position.set(x - 20, 0.06, 0);
+      dashes.add(dash);
+    }
+    scene.add(dashes);
+
+    // 簡單環境：樹（裝飾）
+    function addTree(x, z) {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 3, 8), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }));
+      trunk.castShadow = true; trunk.receiveShadow = true;
+      trunk.position.set(x, 1.5, z);
+
+      const crown = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 12), new THREE.MeshStandardMaterial({ color: 0x2f855a }));
+      crown.castShadow = true; crown.receiveShadow = true;
+      crown.position.set(x, 3.3, z);
+
+      scene.add(trunk, crown);
+    }
+    for (let i = 0; i < 18; i++) {
+      addTree(i * 18 - 6, -roadWidth/2 - 5);
+      addTree(i * 18 - 2, roadWidth/2 + 6);
+    }
+
+    // GLTF/OBJ/STL 載入與排版
+    const gltfLoader = new GLTFLoader();
+    const objLoader = new OBJLoader();
+    const stlLoader = new STLLoader();
+    const models = []; // { name, obj }
+
+    const targetSize = 6; // 目標最大邊長，讓每棟房子大小一致
+    const spacing = 10; // 房子之間的間距（沿 X 方向排）
+    let houseCount = 0;
+
+    function placeModel(obj) {
+      const ix = houseCount;
+      const x = ix * spacing; // 沿 X 軸排成一條街
+      const z = (ix % 2 === 0) ? -4 : 4; // 兩側錯落
+      obj.position.set(x, 0, z);
+      obj.traverse?.(n => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true; }});
+      scene.add(obj);
+      houseCount++;
+      updateList();
+    }
+
+    function scaleAndGround(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      const s = targetSize / maxDim;
+      obj.scale.setScalar(s);
+      // 重新置中到底面
+      box.setFromObject(obj);
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      const yMin = box.min.y;
+      obj.position.add(new THREE.Vector3(-center.x, -yMin, -center.z));
+    }
+
+    function addGLBFromURL(url, name = '模型') {
+      gltfLoader.load(url, (gltf) => {
+        const obj = gltf.scene || gltf.scenes?.[0];
+        scaleAndGround(obj);
+        models.push({ name, obj });
+        placeModel(obj);
+      }, undefined, (err) => {
+        console.error('GLB 載入失敗：', err);
+        alert('GLB 載入失敗：' + (name || url));
+      });
+    }
+
+    function addOBJFromURL(url, name='模型') {
+      objLoader.load(url, (obj) => {
+        // 若 OBJ 沒材質，給個預設材質
+        obj.traverse(n => { if (n.isMesh && !Array.isArray(n.material)) { n.material = n.material || new THREE.MeshStandardMaterial({ color: 0xcccccc }); }});
+        scaleAndGround(obj);
+        models.push({ name, obj });
+        placeModel(obj);
+      }, undefined, (err) => {
+        console.error('OBJ 載入失敗：', err);
+        alert('OBJ 載入失敗：' + (name || url));
+      });
+    }
+
+    function addSTLFromURL(url, name='模型') {
+      stlLoader.load(url, (geom) => {
+        const mat = new THREE.MeshStandardMaterial({ color: 0xd1d5db, metalness: 0.1, roughness: 0.8 });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        const obj = new THREE.Group();
+        obj.add(mesh);
+        scaleAndGround(obj);
+        models.push({ name, obj });
+        placeModel(obj);
+      }, undefined, (err) => {
+        console.error('STL 載入失敗：', err);
+        alert('STL 載入失敗：' + (name || url));
+      });
+    }
+
+    function addFromFile(file) {
+      const url = URL.createObjectURL(file);
+      const name = file.name.replace(/\.(glb|gltf|obj|stl)$/i, '');
+      if (/\.(glb|gltf)$/i.test(file.name)) return addGLBFromURL(url, name);
+      if (/\.obj$/i.test(file.name)) return addOBJFromURL(url, name);
+      if (/\.stl$/i.test(file.name)) return addSTLFromURL(url, name);
+      alert('不支援的檔案格式：' + file.name);
+    }
+
+    // 清單 UI
+    const listEl = document.getElementById('list');
+    function updateList() {
+      listEl.innerHTML = '';
+      models.forEach((m, i) => {
+        const row = document.createElement('div');
+        row.className = 'item';
+        row.innerHTML = `<span class="badge">#${i+1}</span> <span>${m.name}</span>`;
+        listEl.appendChild(row);
+      });
+    }
+
+    // 上傳/拖放處理
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file');
+
+    // 擴充可接受格式
+    fileInput.setAttribute('accept', '.glb,.gltf,.obj,.stl');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }});
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    function handleFiles(fileList) {
+      const files = Array.from(fileList).filter(f => /\.(glb|gltf|obj|stl)$/i.test(f.name));
+      if (!files.length) { alert('請選擇 .glb / .gltf / .obj / .stl 檔案'); return; }
+      files.forEach(addFromFile);
+    }
+
+    ['dragenter','dragover'].forEach(evt => {
+      window.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    });
+    ;['dragleave','drop'].forEach(evt => {
+      window.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); });
+    });
+    window.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      if (!dt?.files?.length) return;
+      handleFiles(dt.files);
+    });
+
+    // 控制列
+    document.getElementById('resetCam').addEventListener('click', () => {
+      camera.position.set(24, 16, 34);
+      controls.target.set(10, 0, 0);
+      controls.update();
+    });
+
+    document.getElementById('clearAll').addEventListener('click', () => {
+      models.forEach(m => scene.remove(m.obj));
+      models.length = 0;
+      houseCount = 0;
+      updateList();
+    });
+
+    // 視窗尺寸處理
+    function resizeRendererToDisplaySize() {
+      const wrap = document.getElementById('canvas-wrap');
+      const width = wrap.clientWidth;
+      const height = wrap.clientHeight;
+      const needResize = canvas.width !== width || canvas.height !== height;
+      if (needResize) {
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      }
+      return needResize;
+    }
+
+    // 動畫迴圈
+    renderer.setAnimationLoop(() => {
+      resizeRendererToDisplaySize();
+      controls.update();
+      renderer.render(scene, camera);
+    });
+
+    // --- 預設示範（可移除）---
+    // addGLBFromURL('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/House/glTF-Binary/House.glb', '示範房子');
+  </script>
+</body>
+</html>
